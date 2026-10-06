@@ -3,6 +3,8 @@ import fs from 'node:fs';
 
 const MOVIE_ID = '129839';
 const URL = `https://filmarks.com/movies/${MOVIE_ID}`;
+const X_URL = 'https://x.com/Koisuru_2026';
+const INSTAGRAM_URL = 'https://www.instagram.com/koisuru_2026/';
 
 function nowJstIso() {
   const parts = new Intl.DateTimeFormat('sv-SE', {
@@ -57,6 +59,44 @@ try {
     console.warn('Mark count unavailable:', e.message);
   }
 
+  let reviewCount = null;
+  try {
+    const candidates = [await page.title(), ...(await page.locator('body').allTextContents())];
+    for (const text of candidates) {
+      const m = String(text).match(/感想・レビュー\s*\[\s*([\d,]+)\s*件\s*\]/) || String(text).match(/レビュー[^\d]{0,20}([\d,]+)\s*件/);
+      if (m) { reviewCount = Number(m[1].replace(/,/g, '')); break; }
+    }
+  } catch (e) { console.warn('Review count unavailable:', e.message); }
+
+  async function socialFollowers(url, platform) {
+    const p = await browser.newPage({ locale: 'ja-JP', timezoneId: 'Asia/Tokyo', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36' });
+    try {
+      await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await p.waitForTimeout(8000);
+      const s = (await p.locator('body').innerText().catch(() => '')) + '\n' + (await p.content());
+      const patterns = platform === 'x'
+        ? [/([\d,.]+\s*[KkMm万]?)\s*(?:Followers|フォロワー)/i, /(?:followers_count|followersCount)[^0-9]{0,40}(\d+)/i]
+        : [/([\d,.]+\s*[KkMm万]?)\s*(?:followers|フォロワー)/i, /(?:edge_followed_by|follower_count|followers_count)[^0-9]{0,40}(\d+)/i];
+      for (const re of patterns) {
+        const m = s.match(re);
+        if (m) {
+          const raw = m[1].replace(/,/g, '').trim();
+          const mm = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*([KkMm万]?)/);
+          if (!mm) continue;
+          let n = Number(mm[1]); const u = mm[2].toLowerCase();
+          if (u === 'k') n *= 1000; else if (u === 'm') n *= 1000000; else if (u === '万') n *= 10000;
+          return Math.round(n);
+        }
+      }
+      return null;
+    } finally { await p.close(); }
+  }
+
+  const [xFollowers, instagramFollowers] = await Promise.all([
+    socialFollowers(X_URL, 'x').catch(e => { console.warn('X unavailable:', e.message); return null; }),
+    socialFollowers(INSTAGRAM_URL, 'instagram').catch(e => { console.warn('Instagram unavailable:', e.message); return null; })
+  ]);
+
   const fetchedAt = nowJstIso();
   let previous = null;
   if (fs.existsSync('current.json')) {
@@ -65,6 +105,9 @@ try {
 
   const previousClip = Number.isFinite(previous?.clip_count) ? previous.clip_count : null;
   const delta = previousClip === null ? null : clipCount - previousClip;
+  const prevReview = Number.isFinite(previous?.review_count) ? previous.review_count : null;
+  const prevX = Number.isFinite(previous?.x_followers) ? previous.x_followers : null;
+  const prevInstagram = Number.isFinite(previous?.instagram_followers) ? previous.instagram_followers : null;
 
   const current = {
     movie_id: Number(MOVIE_ID),
@@ -73,6 +116,17 @@ try {
     fetched_at_jst: fetchedAt,
     clip_count: clipCount,
     mark_count: markCount,
+    review_count: reviewCount,
+    x_followers: xFollowers,
+    instagram_followers: instagramFollowers,
+    x_url: X_URL,
+    instagram_url: INSTAGRAM_URL,
+    previous_review_count: prevReview,
+    delta_review_from_previous: reviewCount === null || prevReview === null ? null : reviewCount - prevReview,
+    previous_x_followers: prevX,
+    delta_x_from_previous: xFollowers === null || prevX === null ? null : xFollowers - prevX,
+    previous_instagram_followers: prevInstagram,
+    delta_instagram_from_previous: instagramFollowers === null || prevInstagram === null ? null : instagramFollowers - prevInstagram,
     previous_clip_count: previousClip,
     delta_from_previous: delta
   };
