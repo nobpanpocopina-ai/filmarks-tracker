@@ -1,0 +1,50 @@
+name: Track Filmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '50 20 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'tracker.js'
+      - 'package.json'
+      - '.github/workflows/track-filmarks.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Read Filmarks counters
+        run: npm run track
+
+      - name: Save result
+        run: |
+          git config user.name "filmarks-tracker"
+          git config user.email "actions@users.noreply.github.com"
+          git add current.json history.csv
+          if git diff --cached --quiet; then
+            echo "No changes to save."
+          else
+            git commit -m "Update Filmarks count"
+            git push
+          fi
