@@ -2,10 +2,10 @@
   "movie_id": 129839,
   "title": "恋する地球人 ‐劇場特別版‐",
   "source_url": "https://filmarks.com/movies/129839",
-  "fetched_at_jst": "2026-10-06T21:43:14+09:00",
+  "fetched_at_jst": "2026-10-06T23:06:04+09:00",
   "clip_count": 362,
   "mark_count": null,
-  "review_count": null,
+  "review_count": 8,
   "x_followers": null,
   "instagram_followers": null,
   "x_url": "https://x.com/Koisuru_2026",
@@ -16,6 +16,6 @@
   "delta_x_from_previous": null,
   "previous_instagram_followers": null,
   "delta_instagram_from_previous": null,
-  "previous_clip_count": 359,
-  "delta_from_previous": 3
+  "previous_clip_count": 362,
+  "delta_from_previous": 0
 }
