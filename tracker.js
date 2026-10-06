@@ -61,9 +61,9 @@ try {
 
   let reviewCount = null;
   try {
-    const candidates = [await page.title(), ...(await page.locator('body').allTextContents())];
+    const candidates = [await page.title(), await page.locator('body').innerText(), await page.content()];
     for (const text of candidates) {
-      const m = String(text).match(/感想・レビュー\s*\[\s*([\d,]+)\s*件\s*\]/) || String(text).match(/レビュー[^\d]{0,20}([\d,]+)\s*件/);
+      const m = String(text).match(/感想・レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)/);
       if (m) { reviewCount = Number(m[1].replace(/,/g, '')); break; }
     }
   } catch (e) { console.warn('Review count unavailable:', e.message); }
@@ -73,7 +73,8 @@ try {
     try {
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await p.waitForTimeout(8000);
-      const s = (await p.locator('body').innerText().catch(() => '')) + '\n' + (await p.content());
+      const metas = await p.locator('meta').evaluateAll(els => els.map(e => `${e.getAttribute('name')||e.getAttribute('property')||''}=${e.getAttribute('content')||''}`).join('\n')).catch(() => '');
+      const s = (await p.locator('body').innerText().catch(() => '')) + '\n' + metas + '\n' + (await p.content());
       const patterns = platform === 'x'
         ? [/([\d,.]+\s*[KkMm万]?)\s*(?:Followers|フォロワー)/i, /(?:followers_count|followersCount)[^0-9]{0,40}(\d+)/i]
         : [/([\d,.]+\s*[KkMm万]?)\s*(?:followers|フォロワー)/i, /(?:edge_followed_by|follower_count|followers_count)[^0-9]{0,40}(\d+)/i];
