@@ -1,0 +1,12 @@
+{
+  "name": "filmarks-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "track": "node tracker.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
