@@ -102,7 +102,9 @@ try {
       }
       return { found, diagnostics: {
         reviewLinks: links.slice(0, 6).map(el => ({ href: el.getAttribute('href'), text: (el.innerText || el.textContent || '').trim().slice(0, 160) })),
-        reviewText: text.split('\n').filter(x => /レビュー|感想/.test(x)).slice(0, 18).map(x => x.slice(0, 160))
+        reviewText: text.split('\n').filter(x => /レビュー|感想/.test(x)).slice(0, 18).map(x => x.slice(0, 160)),
+        reviewDom: [...document.querySelectorAll('a,button,h1,h2,h3,span,div')].filter(el => /レビュー|感想/.test(el.textContent || '') && (el.textContent || '').length < 180).slice(0, 35).map(el => ({tag:el.tagName, cls:String(el.className).slice(0,100), text:(el.textContent||'').trim().slice(0,140), html:el.outerHTML.slice(0,450)})),
+        numericReviewContext: [...text.matchAll(/.{0,35}(?:レビュー|感想).{0,90}/g)].slice(0,25).map(m=>m[0])
       }};
     }, MOVIE_ID);
     const values = [...new Set(evidence.found.map(x => x.value))];
