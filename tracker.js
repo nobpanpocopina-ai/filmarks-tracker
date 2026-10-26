@@ -109,6 +109,49 @@ try {
     }, MOVIE_ID);
     const values = [...new Set(evidence.found.map(x => x.value))];
     if (values.length === 1) reviewCount = values[0];
+    // If Filmarks omits the total, count unique review entries across all pages.
+    // Only publish the count after pagination is exhausted; never count one page as the total.
+    if (reviewCount === null) {
+      const ids = new Set();
+      const visited = new Set();
+      let url = URL;
+      let complete = false;
+      for (let i = 0; i < 40; i++) {
+        if (visited.has(url)) break;
+        visited.add(url);
+        const p = i === 0 ? page : await browser.newPage({ locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
+        try {
+          if (i > 0) await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+          const result = await p.evaluate(movieId => {
+            const root = document.querySelector('.p-content-detail-timeline') || document;
+            const reviewIds = [...root.querySelectorAll('a[href]')]
+              .map(a => (a.getAttribute('href') || '').match(new RegExp('^/movies/' + movieId + '/reviews/(\\d+)')))
+              .filter(Boolean).map(m => m[1]);
+            const next = [...root.querySelectorAll('a[href]')].find(a =>
+              a.getAttribute('rel') === 'next' ||
+              /^(?:次へ|次のページ|›|»|Next)$/i.test((a.textContent || '').trim()) && /[?&]page=\d+/.test(a.href)
+            );
+            const pagination = [...root.querySelectorAll('a[href*="page="]')].map(a => a.href);
+            return { reviewIds, next: next?.href || null, pagination };
+          }, MOVIE_ID);
+          result.reviewIds.forEach(id => ids.add(id));
+          console.log('Review pagination:', JSON.stringify({ page: i + 1, count: result.reviewIds.length, unique: ids.size, next: result.next, pagination: result.pagination.slice(0, 12) }));
+          if (result.next && !visited.has(result.next)) url = result.next;
+          else if (result.pagination.length) {
+            const remaining = result.pagination.filter(u => !visited.has(u));
+            if (remaining.length) url = remaining[0];
+            else { complete = true; break; }
+          } else {
+            // A full first page without pagination may be truncated; do not assert a total.
+            if (i > 0 || result.reviewIds.length < 5) complete = true;
+            break;
+          }
+        } finally { if (i > 0) await p.close(); }
+      }
+      if (complete && ids.size > 0) reviewCount = ids.size;
+      else console.warn('Review pagination incomplete:', JSON.stringify({ unique: ids.size, pages: visited.size }));
+    }
+
     else console.warn('Review count unresolved:', JSON.stringify(evidence));
   } catch (e) { console.warn('Review count unavailable:', e.message); }
 
