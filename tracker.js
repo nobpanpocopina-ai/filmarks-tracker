@@ -59,22 +59,55 @@ try {
     console.warn('Mark count unavailable:', e.message);
   }
 
-  // Read only the explicit total-review count, never the first number near the word レビュー.
-  // An ambiguous page must yield null rather than a misleading value.
+  // Review count: only use an explicit total associated with this movie.
+  // Avoid the generic "レビュー ... number" pattern (it matched unrelated counts).
   let reviewCount = null;
   try {
-    const bodyText = await page.locator('body').innerText();
-    const reviewPatterns = [
-      /([\d,]+)\s*件のレビュー/g,
-      /([\d,]+)\s*件の感想(?:・レビュー)?/g,
-      /感想・レビュー\s*[（(]?\s*([\d,]+)\s*件/g
-    ];
-    const totals = new Set();
-    for (const pattern of reviewPatterns) {
-      for (const match of bodyText.matchAll(pattern)) totals.add(Number(match[1].replace(/,/g, '')));
-    }
-    if (totals.size === 1) reviewCount = [...totals][0];
-    else console.warn('Review total unavailable or ambiguous:', [...totals]);
+    const evidence = await page.evaluate((movieId) => {
+      const found = [];
+      const add = (source, n) => {
+        if (Number.isSafeInteger(n) && n >= 0) found.push({ source, value: n });
+      };
+      const parse = v => {
+        const m = String(v ?? '').trim().match(/^([\d,]+)$/);
+        return m ? Number(m[1].replace(/,/g, '')) : null;
+      };
+      // Structured metadata is preferred when it explicitly names reviewCount.
+      for (const el of document.querySelectorAll('script[type="application/ld+json"]')) {
+        try {
+          const walk = obj => {
+            if (!obj || typeof obj !== 'object') return;
+            if (Array.isArray(obj)) { obj.forEach(walk); return; }
+            if (obj.aggregateRating?.reviewCount != null) add('jsonld.aggregateRating.reviewCount', parse(obj.aggregateRating.reviewCount));
+            if (obj.reviewCount != null && (obj['@type'] === 'AggregateRating')) add('jsonld.reviewCount', parse(obj.reviewCount));
+            Object.values(obj).forEach(walk);
+          };
+          walk(JSON.parse(el.textContent));
+        } catch {}
+      }
+      // Read the review count in review navigation, not numbers in individual reviews.
+      const links = [...document.querySelectorAll('a[href]')].filter(el => {
+        const href = el.getAttribute('href') || '';
+        return href.includes('/movies/' + movieId + '/reviews') || href.includes('/movies/' + movieId + '?') && href.includes('review');
+      });
+      for (const el of links) {
+        const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        for (const re of [/感想・レビュー\s*[（(]?\s*([\d,]+)\s*件/, /レビュー\s*[（(]\s*([\d,]+)\s*[）)]/, /([\d,]+)\s*件\s*の\s*(?:感想|レビュー)/]) {
+          const m = t.match(re); if (m) add('review-navigation', parse(m[1]));
+        }
+      }
+      const text = document.body?.innerText || '';
+      for (const re of [/感想・レビュー\s*[（(]\s*([\d,]+)\s*[）)]/g, /感想・レビュー\s*([\d,]+)\s*件/g, /([\d,]+)\s*件の感想・レビュー/g]) {
+        for (const m of text.matchAll(re)) add('explicit-review-total', parse(m[1]));
+      }
+      return { found, diagnostics: {
+        reviewLinks: links.slice(0, 6).map(el => ({ href: el.getAttribute('href'), text: (el.innerText || el.textContent || '').trim().slice(0, 160) })),
+        reviewText: text.split('\n').filter(x => /レビュー|感想/.test(x)).slice(0, 18).map(x => x.slice(0, 160))
+      }};
+    }, MOVIE_ID);
+    const values = [...new Set(evidence.found.map(x => x.value))];
+    if (values.length === 1) reviewCount = values[0];
+    else console.warn('Review count unresolved:', JSON.stringify(evidence));
   } catch (e) { console.warn('Review count unavailable:', e.message); }
 
   // Social metrics are not part of this daily report.
