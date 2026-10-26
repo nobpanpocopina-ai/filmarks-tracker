@@ -65,9 +65,9 @@ try {
   try {
     const bodyText = await page.locator('body').innerText();
     const reviewPatterns = [
-      /([\\d,]+)\\s*件のレビュー/g,
-      /([\\d,]+)\\s*件の感想(?:・レビュー)?/g,
-      /感想・レビュー\\s*[（(]?\\s*([\\d,]+)\\s*件/g
+      /([\d,]+)\s*件のレビュー/g,
+      /([\d,]+)\s*件の感想(?:・レビュー)?/g,
+      /感想・レビュー\s*[（(]?\s*([\d,]+)\s*件/g
     ];
     const totals = new Set();
     for (const pattern of reviewPatterns) {
