@@ -59,44 +59,27 @@ try {
     console.warn('Mark count unavailable:', e.message);
   }
 
+  // Read only the explicit total-review count, never the first number near the word レビュー.
+  // An ambiguous page must yield null rather than a misleading value.
   let reviewCount = null;
   try {
-    const candidates = [await page.title(), await page.locator('body').innerText(), await page.content()];
-    for (const text of candidates) {
-      const m = String(text).match(/感想・レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)/);
-      if (m) { reviewCount = Number(m[1].replace(/,/g, '')); break; }
+    const bodyText = await page.locator('body').innerText();
+    const reviewPatterns = [
+      /([\\d,]+)\\s*件のレビュー/g,
+      /([\\d,]+)\\s*件の感想(?:・レビュー)?/g,
+      /感想・レビュー\\s*[（(]?\\s*([\\d,]+)\\s*件/g
+    ];
+    const totals = new Set();
+    for (const pattern of reviewPatterns) {
+      for (const match of bodyText.matchAll(pattern)) totals.add(Number(match[1].replace(/,/g, '')));
     }
+    if (totals.size === 1) reviewCount = [...totals][0];
+    else console.warn('Review total unavailable or ambiguous:', [...totals]);
   } catch (e) { console.warn('Review count unavailable:', e.message); }
 
-  async function socialFollowers(url, platform) {
-    const p = await browser.newPage({ locale: 'ja-JP', timezoneId: 'Asia/Tokyo', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36' });
-    try {
-      await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await p.waitForTimeout(8000);
-      const metas = await p.locator('meta').evaluateAll(els => els.map(e => `${e.getAttribute('name')||e.getAttribute('property')||''}=${e.getAttribute('content')||''}`).join('\n')).catch(() => '');
-      const s = (await p.locator('body').innerText().catch(() => '')) + '\n' + metas + '\n' + (await p.content());
-      const patterns = platform === 'x'
-        ? [/([\d,.]+\s*[KkMm万]?)\s*(?:Followers|フォロワー)/i, /(?:followers_count|followersCount)[^0-9]{0,40}(\d+)/i]
-        : [/([\d,.]+\s*[KkMm万]?)\s*(?:followers|フォロワー)/i, /(?:edge_followed_by|follower_count|followers_count)[^0-9]{0,40}(\d+)/i];
-      for (const re of patterns) {
-        const m = s.match(re);
-        if (m) {
-          const raw = m[1].replace(/,/g, '').trim();
-          const mm = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*([KkMm万]?)/);
-          if (!mm) continue;
-          let n = Number(mm[1]); const u = mm[2].toLowerCase();
-          if (u === 'k') n *= 1000; else if (u === 'm') n *= 1000000; else if (u === '万') n *= 10000;
-          return Math.round(n);
-        }
-      }
-      return null;
-    } finally { await p.close(); }
-  }
-
-  const [xFollowers, instagramFollowers] = await Promise.all([
-    socialFollowers(X_URL, 'x').catch(e => { console.warn('X unavailable:', e.message); return null; }),
-    socialFollowers(INSTAGRAM_URL, 'instagram').catch(e => { console.warn('Instagram unavailable:', e.message); return null; })
-  ]);
+  // Social metrics are not part of this daily report.
+  const xFollowers = null;
+  const instagramFollowers = null;
 
   const fetchedAt = nowJstIso();
   let previous = null;
