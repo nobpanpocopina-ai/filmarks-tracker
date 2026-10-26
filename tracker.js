@@ -59,100 +59,13 @@ try {
     console.warn('Mark count unavailable:', e.message);
   }
 
-  // Review count: only use an explicit total associated with this movie.
-  // Avoid the generic "レビュー ... number" pattern (it matched unrelated counts).
   let reviewCount = null;
   try {
-    const evidence = await page.evaluate((movieId) => {
-      const found = [];
-      const add = (source, n) => {
-        if (Number.isSafeInteger(n) && n >= 0) found.push({ source, value: n });
-      };
-      const parse = v => {
-        const m = String(v ?? '').trim().match(/^([\d,]+)$/);
-        return m ? Number(m[1].replace(/,/g, '')) : null;
-      };
-      // Structured metadata is preferred when it explicitly names reviewCount.
-      for (const el of document.querySelectorAll('script[type="application/ld+json"]')) {
-        try {
-          const walk = obj => {
-            if (!obj || typeof obj !== 'object') return;
-            if (Array.isArray(obj)) { obj.forEach(walk); return; }
-            if (obj.aggregateRating?.reviewCount != null) add('jsonld.aggregateRating.reviewCount', parse(obj.aggregateRating.reviewCount));
-            if (obj.reviewCount != null && (obj['@type'] === 'AggregateRating')) add('jsonld.reviewCount', parse(obj.reviewCount));
-            Object.values(obj).forEach(walk);
-          };
-          walk(JSON.parse(el.textContent));
-        } catch {}
-      }
-      // Read the review count in review navigation, not numbers in individual reviews.
-      const links = [...document.querySelectorAll('a[href]')].filter(el => {
-        const href = el.getAttribute('href') || '';
-        return href.includes('/movies/' + movieId + '/reviews') || href.includes('/movies/' + movieId + '?') && href.includes('review');
-      });
-      for (const el of links) {
-        const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-        for (const re of [/感想・レビュー\s*[（(]?\s*([\d,]+)\s*件/, /レビュー\s*[（(]\s*([\d,]+)\s*[）)]/, /([\d,]+)\s*件\s*の\s*(?:感想|レビュー)/]) {
-          const m = t.match(re); if (m) add('review-navigation', parse(m[1]));
-        }
-      }
-      const text = document.body?.innerText || '';
-      for (const re of [/感想・レビュー\s*[（(]\s*([\d,]+)\s*[）)]/g, /感想・レビュー\s*([\d,]+)\s*件/g, /([\d,]+)\s*件の感想・レビュー/g]) {
-        for (const m of text.matchAll(re)) add('explicit-review-total', parse(m[1]));
-      }
-      return { found, diagnostics: {
-        reviewLinks: links.slice(0, 6).map(el => ({ href: el.getAttribute('href'), text: (el.innerText || el.textContent || '').trim().slice(0, 160) })),
-        reviewText: text.split('\n').filter(x => /レビュー|感想/.test(x)).slice(0, 18).map(x => x.slice(0, 160)),
-        reviewDom: [...document.querySelectorAll('a,button,h1,h2,h3,span,div')].filter(el => /レビュー|感想/.test(el.textContent || '') && (el.textContent || '').length < 180).slice(0, 35).map(el => ({tag:el.tagName, cls:String(el.className).slice(0,100), text:(el.textContent||'').trim().slice(0,140), html:el.outerHTML.slice(0,450)})),
-        numericReviewContext: [...text.matchAll(/.{0,35}(?:レビュー|感想).{0,90}/g)].slice(0,25).map(m=>m[0])
-      }};
-    }, MOVIE_ID);
-    const values = [...new Set(evidence.found.map(x => x.value))];
-    if (values.length === 1) reviewCount = values[0];
-    // If Filmarks omits the total, count unique review entries across all pages.
-    // Only publish the count after pagination is exhausted; never count one page as the total.
-    if (reviewCount === null) {
-      const ids = new Set();
-      const visited = new Set();
-      let url = URL;
-      let complete = false;
-      for (let i = 0; i < 40; i++) {
-        if (visited.has(url)) break;
-        visited.add(url);
-        const p = i === 0 ? page : await browser.newPage({ locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
-        try {
-          if (i > 0) await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          const result = await p.evaluate(movieId => {
-            const root = document.querySelector('.p-content-detail-timeline') || document;
-            const reviewIds = [...root.querySelectorAll('a[href]')]
-              .map(a => (a.getAttribute('href') || '').match(new RegExp('^/movies/' + movieId + '/reviews/(\\d+)')))
-              .filter(Boolean).map(m => m[1]);
-            const next = [...root.querySelectorAll('a[href]')].find(a =>
-              a.getAttribute('rel') === 'next' ||
-              /^(?:次へ|次のページ|›|»|Next)$/i.test((a.textContent || '').trim()) && /[?&]page=\d+/.test(a.href)
-            );
-            const pagination = [...root.querySelectorAll('a[href*="page="]')].map(a => a.href);
-            return { reviewIds, next: next?.href || null, pagination };
-          }, MOVIE_ID);
-          result.reviewIds.forEach(id => ids.add(id));
-          console.log('Review pagination:', JSON.stringify({ page: i + 1, count: result.reviewIds.length, unique: ids.size, next: result.next, pagination: result.pagination.slice(0, 12) }));
-          if (result.next && !visited.has(result.next)) url = result.next;
-          else if (result.pagination.length) {
-            const remaining = result.pagination.filter(u => !visited.has(u));
-            if (remaining.length) url = remaining[0];
-            else { complete = true; break; }
-          } else {
-            // A full first page without pagination may be truncated; do not assert a total.
-            if (i > 0 || result.reviewIds.length < 5) complete = true;
-            break;
-          }
-        } finally { if (i > 0) await p.close(); }
-      }
-      if (complete && ids.size > 0) reviewCount = ids.size;
-      else console.warn('Review pagination incomplete:', JSON.stringify({ unique: ids.size, pages: visited.size }));
+    const candidates = [await page.title(), await page.locator('body').innerText(), await page.content()];
+    for (const text of candidates) {
+      const m = String(text).match(/感想・レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)\s*件/) || String(text).match(/レビュー[^0-9]{0,40}([\d,]+)/);
+      if (m) { reviewCount = Number(m[1].replace(/,/g, '')); break; }
     }
-
-    else console.warn('Review count unresolved:', JSON.stringify(evidence));
   } catch (e) { console.warn('Review count unavailable:', e.message); }
 
   // Social metrics are not part of this daily report.
