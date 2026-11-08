@@ -3,7 +3,11 @@ name: Track Filmarks
 on:
   workflow_dispatch:
   schedule:
-    - cron: '50 20 * * *'
+    # GitHub scheduled runs can be delayed or dropped. Retry at several off-peak minutes.
+    # JST: 04:40, 05:10, 05:40, 06:05, 06:15
+    - cron: '40 19 * * *'
+    - cron: '10,40 20 * * *'
+    - cron: '5,15 21 * * *'
   push:
     branches: [main]
     paths:
@@ -14,6 +18,11 @@ on:
 permissions:
   contents: write
 
+# Prevent concurrent runs from racing to overwrite current.json.
+concurrency:
+  group: filmarks-daily
+  cancel-in-progress: false
+
 jobs:
   track:
     runs-on: ubuntu-latest
@@ -22,22 +31,47 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Skip duplicate scheduled update for the same JST date
+        id: freshness
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const today = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+          }).format(new Date());
+          let previous = {};
+          try { previous = JSON.parse(fs.readFileSync('current.json', 'utf8')); } catch {}
+          const alreadyUpdated = previous.fetched_at_jst?.slice(0, 10) === today &&
+            Number.isFinite(previous.clip_count);
+          const skip = process.env.GITHUB_EVENT_NAME === 'schedule' && alreadyUpdated;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip=${skip}\n`);
+          console.log(JSON.stringify({ today, previousFetch: previous.fetched_at_jst, skip }));
+          NODE
 
       - name: Set up Node.js
+        if: steps.freshness.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install dependencies
+        if: steps.freshness.outputs.skip != 'true'
         run: npm install --no-audit --no-fund
 
       - name: Install Chromium
+        if: steps.freshness.outputs.skip != 'true'
         run: npx playwright install chromium
 
       - name: Read Filmarks counters
+        if: steps.freshness.outputs.skip != 'true'
         run: npm run track
 
       - name: Save result
+        if: steps.freshness.outputs.skip != 'true'
         run: |
           git config user.name "filmarks-tracker"
           git config user.email "actions@users.noreply.github.com"
@@ -46,5 +80,6 @@ jobs:
             echo "No changes to save."
           else
             git commit -m "Update Filmarks count"
+            git pull --rebase origin main
             git push
           fi
